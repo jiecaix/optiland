@@ -257,6 +257,9 @@ class Surface:
         self.aoi = be.empty(0)
         self.opd = be.empty(0)
 
+        # Clear stored rays reference
+        self._stored_rays = None
+
     def set_fresnel_coating(self):
         """Sets the coating of the surface to a Fresnel coating."""
         self.interaction_model.coating = FresnelCoating(
@@ -270,6 +273,9 @@ class Surface:
             rays: The rays.
 
         """
+        # Store rays reference for path data access
+        self._stored_rays = rays
+
         if isinstance(rays, ParaxialRays):
             self.y = be.copy(be.atleast_1d(rays.y))
             self.u = be.copy(be.atleast_1d(rays.u))

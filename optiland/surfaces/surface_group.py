@@ -537,3 +537,37 @@ class SurfaceGroup:
             )
         self._update_surface_links()
         self.reset()
+
+    @property
+    def has_ray_paths(self):
+        """Check if any surface has path data.
+
+        Returns:
+            bool: True if at least one surface has recorded ray paths,
+                  False otherwise.
+        """
+        return any(
+            hasattr(surf, "_stored_rays")
+            and surf._stored_rays is not None
+            and surf._stored_rays.has_path()
+            for surf in self.surfaces
+        )
+
+    def get_ray_paths(self):
+        """Get all ray paths through GRIN media in the system.
+
+        Only surfaces with recorded ray path data are included. Surfaces
+        without path data (e.g., standard surfaces without GRIN materials)
+        are skipped.
+
+        Returns:
+            list: List of (path_x, path_y, path_z) tuples, one per surface
+                  with recorded path data. Each array has shape
+                  (num_points, num_rays).
+        """
+        paths = []
+        for surf in self.surfaces:
+            if hasattr(surf, "_stored_rays") and surf._stored_rays is not None:
+                if surf._stored_rays.has_path():
+                    paths.append(surf._stored_rays.get_path())
+        return paths

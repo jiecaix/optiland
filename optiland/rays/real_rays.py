@@ -87,6 +87,12 @@ class RealRays(BaseRays):
 
         self.is_normalized = True
 
+        # Optional path tracking for curved ray trajectories (GRIN materials)
+        self._path_x: list | None = None
+        self._path_y: list | None = None
+        self._path_z: list | None = None
+        self._recording_path = False
+
     def rotate_x(self, rx: ScalarOrArray):
         """Rotate the rays about the x-axis.
 
@@ -509,6 +515,57 @@ class RealRays(BaseRays):
         self.M = self.M / mag
         self.N = self.N / mag
         self.is_normalized = True
+
+    def start_path_recording(self):
+        """Enable path recording for GRIN materials.
+
+        Initializes the path history and records the current position
+        as the first point.
+        """
+        self._recording_path = True
+        self._path_x = []
+        self._path_y = []
+        self._path_z = []
+        self._record_path_point()
+
+    def stop_path_recording(self):
+        """Disable path recording."""
+        self._recording_path = False
+
+    def _record_path_point(self):
+        """Record current positions if path recording is enabled.
+
+        This should be called during ray propagation to build a history
+        of positions for visualization of curved ray paths.
+        """
+        if self._recording_path:
+            self._path_x.append(be.copy(self.x))
+            self._path_y.append(be.copy(self.y))
+            self._path_z.append(be.copy(self.z))
+
+    def get_path(self):
+        """Get recorded path as arrays.
+
+        Returns:
+            tuple: (path_x, path_y, path_z) where each has shape
+                   (num_points, num_rays), or (None, None, None)
+                   if no path has been recorded.
+        """
+        if not self.has_path():
+            return None, None, None
+        return (
+            be.stack(self._path_x),
+            be.stack(self._path_y),
+            be.stack(self._path_z),
+        )
+
+    def has_path(self):
+        """Check if path data is available.
+
+        Returns:
+            bool: True if path data has been recorded, False otherwise.
+        """
+        return self._path_x is not None and len(self._path_x) > 0
 
     def _align_surface_normal(
         self, nx: float, ny: float, nz: float

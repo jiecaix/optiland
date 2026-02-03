@@ -26,16 +26,19 @@ class GRINPropagation(BasePropagationModel):
 
     """
 
-    def __init__(self, material: BaseMaterial):
+    def __init__(self, material: BaseMaterial, record_path: bool = False):
         """Initializes the GRINPropagation model.
 
         Args:
             material: A reference to the parent material instance, used to
                 query for refractive index and gradient.
+            record_path: If True, record intermediate path points during
+                propagation for visualization. Default is False.
 
         """
         self.material = material
         self.step_size = 0.01  # Default step size for RK4 integration (in mm)
+        self.record_path = record_path
 
     def propagate(self, rays: RealRays, t: float) -> None:
         """Propagates rays through the GRIN medium to the exit surface.
@@ -56,7 +59,9 @@ class GRINPropagation(BasePropagationModel):
         # For now, use the provided t as a target distance and integrate
         # through the GRIN medium.
 
-        num_rays = len(rays.x)
+        # Initialize path recording if enabled
+        if self.record_path:
+            rays.start_path_recording()
 
         # Store initial state for each ray
         z_initial = be.copy(rays.z)
@@ -64,16 +69,14 @@ class GRINPropagation(BasePropagationModel):
         # Target z position (exit surface)
         z_target = z_initial + t
 
-        # Get wavelength
-        w = rays.w
-
         # Maximum iterations to prevent infinite loops
         max_iterations = 10000
 
-        for iteration in range(max_iterations):
+        for _iteration in range(max_iterations):
             # Check which rays still need to propagate
-            # Rays are active if they are within the medium bounds
-            # Allow rays to propagate in either direction (N can be positive or negative)
+            # Rays are active if within the medium bounds
+            # Allow rays to propagate in either direction
+            # (N can be positive or negative)
             z_min = be.minimum(z_initial, z_target)
             z_max = be.maximum(z_initial, z_target)
             active = (rays.z > z_min - 1e-6) & (rays.z < z_max - 1e-6)
@@ -84,6 +87,14 @@ class GRINPropagation(BasePropagationModel):
             # RK4 integration step for active rays
             if be.any(active):
                 self._rk4_step(rays, active, z_min, z_max)
+
+                # Record path point after each step if enabled
+                if self.record_path:
+                    rays._record_path_point()
+
+        # Stop path recording
+        if self.record_path:
+            rays.stop_path_recording()
 
         # Update OPD (optical path difference)
         # For GRIN, this should be accumulated during propagation
@@ -114,19 +125,27 @@ class GRINPropagation(BasePropagationModel):
         N = rays.N[active]
         w = rays.w[active]
 
+        # Filter boundary arrays for active rays
+        z_max_active = z_max[active]
+        z_min_active = z_min[active]
+
         # Adaptive step size based on distance to boundaries
         # Limit step size to prevent overshooting boundaries
         if be.any(N > 0):
             # Rays propagating toward z_max
-            remaining_forward = (z_max - z) * (N > 0)
-            step_size_forward = be.minimum(self.step_size, be.abs(remaining_forward * 0.9))
+            remaining_forward = (z_max_active - z) * (N > 0)
+            step_size_forward = be.minimum(
+                self.step_size, be.abs(remaining_forward * 0.9)
+            )
         else:
             step_size_forward = be.full_like(z, self.step_size)
 
         if be.any(N < 0):
             # Rays propagating toward z_min
-            remaining_backward = (z - z_min) * (N < 0)
-            step_size_backward = be.minimum(self.step_size, be.abs(remaining_backward * 0.9))
+            remaining_backward = (z - z_min_active) * (N < 0)
+            step_size_backward = be.minimum(
+                self.step_size, be.abs(remaining_backward * 0.9)
+            )
         else:
             step_size_backward = be.full_like(z, self.step_size)
 
@@ -168,12 +187,12 @@ class GRINPropagation(BasePropagationModel):
         k4 = self._ray_derivative(x4, y4, z4, L4, M4, N4, w)
 
         # Update state
-        rays.x[active] = x + (step_size / 6.0) * (k1[0] + 2*k2[0] + 2*k3[0] + k4[0])
-        rays.y[active] = y + (step_size / 6.0) * (k1[1] + 2*k2[1] + 2*k3[1] + k4[1])
-        rays.z[active] = z + (step_size / 6.0) * (k1[2] + 2*k2[2] + 2*k3[2] + k4[2])
-        rays.L[active] = L + (step_size / 6.0) * (k1[3] + 2*k2[3] + 2*k3[3] + k4[3])
-        rays.M[active] = M + (step_size / 6.0) * (k1[4] + 2*k2[4] + 2*k3[4] + k4[4])
-        rays.N[active] = N + (step_size / 6.0) * (k1[5] + 2*k2[5] + 2*k3[5] + k4[5])
+        rays.x[active] = x + (step_size / 6.0) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0])
+        rays.y[active] = y + (step_size / 6.0) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])
+        rays.z[active] = z + (step_size / 6.0) * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2])
+        rays.L[active] = L + (step_size / 6.0) * (k1[3] + 2 * k2[3] + 2 * k3[3] + k4[3])
+        rays.M[active] = M + (step_size / 6.0) * (k1[4] + 2 * k2[4] + 2 * k3[4] + k4[4])
+        rays.N[active] = N + (step_size / 6.0) * (k1[5] + 2 * k2[5] + 2 * k3[5] + k4[5])
 
     def _ray_derivative(self, x, y, z, L, M, N, w):
         """Calculates the derivative of the ray state.
@@ -193,7 +212,7 @@ class GRINPropagation(BasePropagationModel):
 
         """
         # Get refractive index and gradient at current position
-        if hasattr(self.material, 'get_index_and_gradient'):
+        if hasattr(self.material, "get_index_and_gradient"):
             n, dn_dx, dn_dy, dn_dz = self.material.get_index_and_gradient(x, y, z, w)
         else:
             # Fallback for materials without gradient support
@@ -217,7 +236,7 @@ class GRINPropagation(BasePropagationModel):
         return (dx_ds, dy_ds, dz_ds, dL_ds, dM_ds, dN_ds)
 
     @classmethod
-    def from_dict(cls, d: dict, material: BaseMaterial = None) -> "GRINPropagation":
+    def from_dict(cls, d: dict, material: BaseMaterial = None) -> GRINPropagation:
         """Creates a GRINPropagation model from a dictionary.
 
         Args:
