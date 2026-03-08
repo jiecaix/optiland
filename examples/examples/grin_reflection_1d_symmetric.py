@@ -295,6 +295,7 @@ def trace_rays_1d_symmetric(
     plasma_wl1: float = -0.05,
     n_floor: float = 1e-3,
     random_seed: int = 42,
+    enforce_cutoff_reflection: bool = True,
     output_file: str = 'grin_reflection_1d_symmetric.png',
 ):
     """Trace rays from symmetric 1D Gaussian distribution through GRIN medium.
@@ -380,12 +381,10 @@ def trace_rays_1d_symmetric(
                 self.n_floor,
             )
 
-            # Calculate gradient
-            # dn/dλp = (density_factor * λ² / λp³) / (2 * sqrt(1 - λ²/λp²))
-            # But we need dn/dz = (dn/dλp) * (dλp/dz) = (dn/dλp) * λp1
-
+            # Calculate axial gradient directly:
+            # dn/dz = f * lambda_p1 * wavelength^2 / (lambda_p^3 * sqrt(1 - ratio^2))
             sqrt_term = be.sqrt(be.maximum(1.0 - ratio_squared, 1e-12))
-            dn_dlambda_p = be.where(
+            dn_dz = be.where(
                 ratio_squared < 1.0,
                 self.plasma_density_factor
                 * self.plasma_wavelength_1
@@ -396,7 +395,6 @@ def trace_rays_1d_symmetric(
 
             dn_dx = be.zeros_like(n)
             dn_dy = be.zeros_like(n)
-            dn_dz = dn_dlambda_p
 
             return n, dn_dx, dn_dy, dn_dz
 
@@ -508,10 +506,11 @@ def trace_rays_1d_symmetric(
                 N_curr /= norm
 
             # Explicit real-valued reflection trigger at Drude cutoff.
-            lambda_p_curr = material._get_plasma_wavelength(z_curr)
-            ratio_sq_curr = (w_curr / lambda_p_curr) ** 2
-            if ratio_sq_curr >= 1.0 and N_curr > 0.0:
-                N_curr = -abs(N_curr)
+            if use_drude and enforce_cutoff_reflection:
+                lambda_p_curr = material._get_plasma_wavelength(z_curr)
+                ratio_sq_curr = (w_curr / lambda_p_curr) ** 2
+                if ratio_sq_curr >= 1.0 and N_curr > 0.0:
+                    N_curr = -abs(N_curr)
 
             # Record point
             ray_paths_x[i].append(x_curr)
@@ -670,6 +669,10 @@ Examples:
                        help='Output filename (default: grin_reflection_1d_symmetric.png)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed for reproducible frequency sampling (default: 42)')
+    parser.add_argument('--n-floor', type=float, default=1e-3,
+                       help='Real refractive-index floor in evanescent region (default: 1e-3)')
+    parser.add_argument('--disable-cutoff-reflection', action='store_true',
+                       help='Disable explicit reflection trigger at Drude cutoff')
 
     args = parser.parse_args()
 
@@ -699,6 +702,8 @@ Examples:
             use_drude=args.use_drude,
             plasma_wl0=args.plasma_wl0,
             plasma_wl1=args.plasma_wl1,
+            n_floor=args.n_floor,
             random_seed=args.seed,
+            enforce_cutoff_reflection=(not args.disable_cutoff_reflection),
             output_file=args.output,
         )
