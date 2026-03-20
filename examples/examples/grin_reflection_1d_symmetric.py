@@ -46,16 +46,11 @@ def generate_symmetric_gaussian_samples(
     num_samples = max(2, num_samples if num_samples % 2 == 0 else num_samples + 1)
     half_samples = num_samples // 2
 
-    # Generate positive side (using inverse CDF for equal spacing)
-    # We want to sample from sigma to 3*sigma (covers 99.7% of distribution)
+    # Equal-spacing incidence positions (user requirement):
+    # use symmetric, uniformly spaced rays across [-3σ, 3σ].
     max_distance = 3.0 * sigma
-    positive_positions = np.linspace(sigma, max_distance, half_samples)
-
-    # Create symmetric positions (both positive and negative)
-    x_positions = np.concatenate([
-        -positive_positions[::-1],  # Negative side (reversed for symmetry)
-        positive_positions           # Positive side
-    ])
+    spacing = 2.0 * max_distance / (num_samples - 1)
+    x_positions = np.linspace(-max_distance, max_distance, num_samples)
 
     # Add center offset
     x_positions = x_positions + center
@@ -67,19 +62,14 @@ def generate_symmetric_gaussian_samples(
     # CRITICAL FIX: Generate wavelengths ONLY for positive side, then mirror
     # This ensures symmetric positions have IDENTICAL wavelengths for true symmetry!
 
-    # METHOD 1: Standard normal distribution (mean=0, std=1) → wavelength space
-    # Using z-scores from standard normal distribution
-    z_scores = np.random.normal(0, 1, half_samples)
-    positive_wavelengths = wavelength_mean + wavelength_std * z_scores
-
-    # Alternative METHOD 2: Standard normal → frequency space → wavelength
-    # Uncomment to use frequency-based sampling
-    # c = 299.792458  # speed of light in µm·ps
-    # mean_frequency = c / wavelength_mean
-    # std_frequency = mean_frequency * (wavelength_std / wavelength_mean)  # error propagation
-    # z_scores_freq = np.random.normal(0, 1, half_samples)
-    # frequencies = mean_frequency + std_frequency * z_scores_freq
-    # positive_wavelengths = c / frequencies
+    # Standard normal random sampling in FREQUENCY domain, then convert to wavelength.
+    # This follows the requirement of 1D Gaussian random sampled frequency light.
+    c_um_ps = 299.792458  # speed of light in µm·ps
+    mean_frequency = c_um_ps / wavelength_mean
+    std_frequency = mean_frequency * (wavelength_std / wavelength_mean)
+    positive_frequencies = np.random.normal(mean_frequency, std_frequency, half_samples)
+    positive_frequencies = np.clip(positive_frequencies, 1e-9, None)
+    positive_wavelengths = c_um_ps / positive_frequencies
 
     positive_wavelengths = np.clip(positive_wavelengths, 0.3, 1.0)
 
@@ -93,6 +83,7 @@ def generate_symmetric_gaussian_samples(
         'x_positions': x_positions,
         'wavelengths': wavelengths,
         'intensity_weights': intensity_weights,
+        'position_spacing': spacing,
         'num_samples': num_samples,
         'center': center,
         'sigma': sigma,
@@ -302,6 +293,9 @@ def trace_rays_1d_symmetric(
     use_drude: bool = True,
     plasma_wl0: float = 0.8,
     plasma_wl1: float = -0.05,
+    n_floor: float = 1e-3,
+    random_seed: int = 42,
+    enforce_cutoff_reflection: bool = True,
     output_file: str = 'grin_reflection_1d_symmetric.png',
 ):
     """Trace rays from symmetric 1D Gaussian distribution through GRIN medium.
@@ -346,11 +340,13 @@ def trace_rays_1d_symmetric(
             plasma_wavelength_0: float = 0.8,
             plasma_wavelength_1: float = -0.05,
             plasma_density_factor: float = 1.0,
+            n_floor: float = 1e-3,
         ):
             super().__init__(n0=1.0, nz1=0.0)
             self.plasma_wavelength_0 = plasma_wavelength_0
             self.plasma_wavelength_1 = plasma_wavelength_1
             self.plasma_density_factor = plasma_density_factor
+            self.n_floor = n_floor
 
         def _get_plasma_wavelength(self, z: float) -> float:
             """Calculate plasma wavelength at position z."""
@@ -367,8 +363,8 @@ def trace_rays_1d_symmetric(
             n_drude = np.sqrt(np.maximum(0.0, 1.0 - ratio_squared))
             n_final = 1.0 + self.plasma_density_factor * (n_drude - 1.0)
 
-            # For evanescent regime (ratio_squared >= 1), set to negative value
-            n_final = np.where(ratio_squared < 1.0, n_final, -1.0 + 0j)
+            # Keep geometric ray tracing in real domain.
+            n_final = np.where(ratio_squared < 1.0, n_final, self.n_floor)
 
             return n_final
 
@@ -379,23 +375,26 @@ def trace_rays_1d_symmetric(
             ratio_squared = ratio ** 2
 
             # Calculate refractive index using Drude model
-            n = be.where(ratio_squared < 1.0,
-                       1.0 + self.plasma_density_factor * (be.sqrt(1.0 - ratio_squared) - 1.0),
-                       -1.0 + 0j)
+            n = be.where(
+                ratio_squared < 1.0,
+                1.0 + self.plasma_density_factor * (be.sqrt(1.0 - ratio_squared) - 1.0),
+                self.n_floor,
+            )
 
-            # Calculate gradient
-            # dn/dλp = (density_factor * λ² / λp³) / (2 * sqrt(1 - λ²/λp²))
-            # But we need dn/dz = (dn/dλp) * (dλp/dz) = (dn/dλp) * λp1
-
-            dn_dlambda_p = be.where(ratio_squared < 1.0,
-                                 self.plasma_density_factor * self.plasma_wavelength_1 * (
-                                     ratio ** 2 / (lambda_p ** 3) / be.sqrt(1.0 - ratio_squared)
-                                 ),
-                                 0.0)
+            # Calculate axial gradient directly:
+            # dn/dz = f * lambda_p1 * wavelength^2 / (lambda_p^3 * sqrt(1 - ratio^2))
+            sqrt_term = be.sqrt(be.maximum(1.0 - ratio_squared, 1e-12))
+            dn_dz = be.where(
+                ratio_squared < 1.0,
+                self.plasma_density_factor
+                * self.plasma_wavelength_1
+                * (wavelength ** 2)
+                / (lambda_p ** 3 * sqrt_term),
+                0.0,
+            )
 
             dn_dx = be.zeros_like(n)
             dn_dy = be.zeros_like(n)
-            dn_dz = dn_dlambda_p
 
             return n, dn_dx, dn_dy, dn_dz
 
@@ -405,6 +404,7 @@ def trace_rays_1d_symmetric(
         sigma=sigma,
         wavelength_mean=wavelength_mean,
         wavelength_std=wavelength_std,
+        random_seed=random_seed,
     )
 
     x_positions = samples['x_positions']
@@ -417,6 +417,7 @@ def trace_rays_1d_symmetric(
             plasma_wavelength_0=plasma_wl0,
             plasma_wavelength_1=plasma_wl1,
             plasma_density_factor=1.0,
+            n_floor=n_floor,
         )
         model_name = f"Drude Model (λp₀={plasma_wl0}, λp₁={plasma_wl1})"
     else:
@@ -449,6 +450,7 @@ def trace_rays_1d_symmetric(
     print(f"Model: {model_name}")
     print(f"Incidence angle: {angle_deg}°")
     print(f"Wavelength range: {wavelengths.min():.3f} - {wavelengths.max():.3f} µm")
+    print(f"Equal position spacing: {samples['position_spacing']:.4f} mm")
 
     # Use manual integration for path recording
     dt = 0.001  # Integration step size
@@ -502,6 +504,13 @@ def trace_rays_1d_symmetric(
             if norm > 0:
                 L_curr /= norm
                 N_curr /= norm
+
+            # Explicit real-valued reflection trigger at Drude cutoff.
+            if use_drude and enforce_cutoff_reflection:
+                lambda_p_curr = material._get_plasma_wavelength(z_curr)
+                ratio_sq_curr = (w_curr / lambda_p_curr) ** 2
+                if ratio_sq_curr >= 1.0 and N_curr > 0.0:
+                    N_curr = -abs(N_curr)
 
             # Record point
             ray_paths_x[i].append(x_curr)
@@ -658,6 +667,12 @@ Examples:
     parser.add_argument('--output', '-o', type=str,
                        default='grin_reflection_1d_symmetric.png',
                        help='Output filename (default: grin_reflection_1d_symmetric.png)')
+    parser.add_argument('--seed', type=int, default=42,
+                       help='Random seed for reproducible frequency sampling (default: 42)')
+    parser.add_argument('--n-floor', type=float, default=1e-3,
+                       help='Real refractive-index floor in evanescent region (default: 1e-3)')
+    parser.add_argument('--disable-cutoff-reflection', action='store_true',
+                       help='Disable explicit reflection trigger at Drude cutoff')
 
     args = parser.parse_args()
 
@@ -687,5 +702,8 @@ Examples:
             use_drude=args.use_drude,
             plasma_wl0=args.plasma_wl0,
             plasma_wl1=args.plasma_wl1,
+            n_floor=args.n_floor,
+            random_seed=args.seed,
+            enforce_cutoff_reflection=(not args.disable_cutoff_reflection),
             output_file=args.output,
         )
