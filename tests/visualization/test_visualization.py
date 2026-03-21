@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 import pytest
@@ -12,7 +13,13 @@ import optiland.backend as be
 from optiland import fields
 from optiland.coordinate_system import CoordinateSystem
 from optiland.geometries import BaseGeometry, EvenAsphere
-from optiland.materials import AbbeMaterial, BaseMaterial, IdealMaterial, MaterialFile
+from optiland.materials import (
+    AbbeMaterial,
+    BaseMaterial,
+    GradientMaterial,
+    IdealMaterial,
+    MaterialFile,
+)
 from optiland.optic import Optic
 from optiland.samples.objectives import ReverseTelephoto, TessarLens
 from optiland.samples.simple import Edmund_49_847
@@ -22,7 +29,7 @@ from optiland.visualization.system import OpticViewer, OpticViewer3D
 from optiland.visualization.system.system import OpticalSystem
 from optiland.visualization.system.lens import Lens2D, Lens3D
 from optiland.visualization.info import LensInfoViewer
-from optiland.visualization.analysis import SurfaceSagViewer
+from optiland.visualization.analysis import GradientFieldViewer, SurfaceSagViewer
 
 matplotlib.use("Agg")  # use non-interactive backend for testing
 
@@ -524,6 +531,44 @@ class TestSurfaceSagViewer:
         viewer.view(surface_index=1, y_cross_section=1.5, x_cross_section=-1.5)
         assert plt.gcf() is not None
         plt.close()
+
+
+class TestGradientFieldViewer:
+    """Tests for the simple GRIN field slice viewer."""
+
+    def test_sample_slice_returns_expected_gradient(self, set_test_backend):
+        material = GradientMaterial(n0=1.5, nz1=-0.2)
+        viewer = GradientFieldViewer(material)
+
+        sampled = viewer.sample_slice(
+            field="dn_dz",
+            plane="XZ",
+            extent=1.0,
+            fixed_coordinate=0.0,
+            num_points=21,
+        )
+
+        assert sampled["plane"] == "XZ"
+        assert sampled["values"].shape == (21, 21)
+        assert np.allclose(sampled["values"], -0.2)
+
+    def test_view_renders_gradient_slice(self, set_test_backend):
+        material = GradientMaterial(n0=1.6, nr2=0.01, nz1=-0.05)
+        viewer = GradientFieldViewer(material)
+
+        fig, ax, artist = viewer.view(
+            field="grad_mag",
+            plane="XZ",
+            extent=2.0,
+            num_points=31,
+            contour_lines=True,
+        )
+
+        assert fig is not None
+        assert ax.get_xlabel() == "X [mm]"
+        assert ax.get_ylabel() == "Z [mm]"
+        assert artist is not None
+        plt.close(fig)
 
 
 @pytest.mark.parametrize("projection, lens_class", [("2d", Lens2D), ("3d", Lens3D)])
