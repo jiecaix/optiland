@@ -1,6 +1,6 @@
 # Optiland Examples 文档索引
 
-**更新时间**: 2025-03-07
+**更新时间**: 2026-03-21
 
 ---
 
@@ -121,6 +121,26 @@ z = 4.0 mm: ratio² = 1.034 > 1  → n = -1+0j (复数)  ⚠️
 - GRIN光学设计
 - 色散效应教学
 - 超快光学模拟
+
+---
+
+
+### 4. [Adjoint Nonlinear Ray Tracing 可视化构建总方案](./adjoint_nonlinear_ray_tracing_visualization_master_plan.md)
+
+**主题**: 基于参考论文配图与 `ArjunTeh/AdjointNonlinearRayTracing` 仓库，为 Optiland 规划体介质、轨迹、梯度与优化过程的可视化建设路线。
+
+**包含内容**:
+- ✅ 当前 Optiland 与参考工作的能力映射
+- ✅ 体介质场可视化 / 轨迹记录 / benchmark 的模块建议
+- ✅ P0 / P1 / P2 图像优先级与实施阶段划分
+- ✅ 伴随法、autograd、finite difference 的对照落地建议
+- ✅ 下一步最值得先做的 4 个具体任务
+
+**适用场景**:
+- 体介质可视化规划
+- GRIN / Drude 研究型实验整理
+- 可微光线追迹路线设计
+- 伴随优化工作流落地
 
 ---
 
