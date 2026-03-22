@@ -6,6 +6,8 @@ Run:
 
 from __future__ import annotations
 
+import matplotlib
+matplotlib.use('webagg')
 import matplotlib.pyplot as plt
 
 from optiland.materials import GradientMaterial
@@ -47,8 +49,7 @@ def main() -> None:
 
     fig.suptitle("Simple GRIN ray-tracing visualization")
     fig.tight_layout()
-    fig.savefig("grin_ray_trace_visualization.png", dpi=150, bbox_inches="tight")
-    print("Saved 'grin_ray_trace_visualization.png'")
+    plt.show()
 
 
 if __name__ == "__main__":
