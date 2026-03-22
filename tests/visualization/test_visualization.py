@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 import pytest
@@ -12,7 +13,13 @@ import optiland.backend as be
 from optiland import fields
 from optiland.coordinate_system import CoordinateSystem
 from optiland.geometries import BaseGeometry, EvenAsphere
-from optiland.materials import AbbeMaterial, BaseMaterial, IdealMaterial, MaterialFile
+from optiland.materials import (
+    AbbeMaterial,
+    BaseMaterial,
+    GradientMaterial,
+    IdealMaterial,
+    MaterialFile,
+)
 from optiland.optic import Optic
 from optiland.samples.objectives import ReverseTelephoto, TessarLens
 from optiland.samples.simple import Edmund_49_847
@@ -22,7 +29,11 @@ from optiland.visualization.system import OpticViewer, OpticViewer3D
 from optiland.visualization.system.system import OpticalSystem
 from optiland.visualization.system.lens import Lens2D, Lens3D
 from optiland.visualization.info import LensInfoViewer
-from optiland.visualization.analysis import SurfaceSagViewer
+from optiland.visualization.analysis import (
+    GRINRayTraceViewer,
+    GradientFieldViewer,
+    SurfaceSagViewer,
+)
 
 matplotlib.use("Agg")  # use non-interactive backend for testing
 
@@ -541,6 +552,88 @@ class TestSurfaceSagViewer:
         viewer.view(surface_index=1, y_cross_section=1.5, x_cross_section=-1.5)
         assert plt.gcf() is not None
         plt.close()
+
+
+class TestGradientFieldViewer:
+    """Tests for the simple GRIN field slice viewer."""
+
+    def test_sample_slice_returns_expected_gradient(self, set_test_backend):
+        material = GradientMaterial(n0=1.5, nz1=-0.2)
+        viewer = GradientFieldViewer(material)
+
+        sampled = viewer.sample_slice(
+            field="dn_dz",
+            plane="XZ",
+            extent=1.0,
+            fixed_coordinate=0.0,
+            num_points=21,
+        )
+
+        assert sampled["plane"] == "XZ"
+        assert sampled["values"].shape == (21, 21)
+        assert np.allclose(sampled["values"], -0.2)
+
+    def test_view_renders_gradient_slice(self, set_test_backend):
+        material = GradientMaterial(n0=1.6, nr2=0.01, nz1=-0.05)
+        viewer = GradientFieldViewer(material)
+
+        fig, ax, artist = viewer.view(
+            field="grad_mag",
+            plane="XZ",
+            extent=2.0,
+            num_points=31,
+            contour_lines=True,
+        )
+
+        assert fig is not None
+        assert ax.get_xlabel() == "X [mm]"
+        assert ax.get_ylabel() == "Z [mm]"
+        assert artist is not None
+        plt.close(fig)
+
+
+class TestGRINRayTraceViewer:
+    """Tests for 2D/3D GRIN ray-trace visualization."""
+
+    def test_trace_fan_records_progressive_paths(self, set_test_backend):
+        material = GradientMaterial(n0=1.6, nr2=-0.01, nz1=-0.03)
+        viewer = GRINRayTraceViewer(material)
+
+        histories = viewer.trace_fan(
+            num_rays=3,
+            spread=0.5,
+            angle_span=0.1,
+            step_size=0.05,
+            num_steps=40,
+            z_bounds=(0.0, 3.0),
+        )
+
+        assert len(histories) == 3
+        assert histories[0]["z"][-1] > histories[0]["z"][0]
+        assert histories[0]["x"].shape == histories[0]["z"].shape
+
+    def test_view_2d_and_3d_render(self, set_test_backend):
+        material = GradientMaterial(n0=1.6, nr2=-0.01, nz1=-0.03)
+        viewer = GRINRayTraceViewer(material)
+        histories = viewer.trace_fan(
+            num_rays=4,
+            spread=0.6,
+            angle_span=0.12,
+            step_size=0.05,
+            num_steps=50,
+            z_bounds=(0.0, 3.0),
+        )
+
+        fig2d, ax2d = viewer.view_2d(histories, projection="XZ", field="index")
+        fig3d = plt.figure()
+        ax3d = fig3d.add_subplot(111, projection="3d")
+        viewer.view_3d(histories, ax=ax3d)
+
+        assert ax2d.get_xlabel() == "X [mm]"
+        assert ax2d.get_ylabel() == "Z [mm]"
+        assert ax3d.name == "3d"
+        plt.close(fig2d)
+        plt.close(fig3d)
 
 
 @pytest.mark.parametrize("projection, lens_class", [("2d", Lens2D), ("3d", Lens3D)])
