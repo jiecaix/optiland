@@ -214,9 +214,12 @@ class TestOpticViewer3D:
             patch.object(viewer.iren, "Start") as mock_start,
             patch.object(viewer.ren_win, "Render") as mock_render,
         ):
-            viewer.view()
+            ren_win, renderer, iren = viewer.view()
             mock_start.assert_called_once()
             mock_render.assert_called()
+            assert ren_win is viewer.ren_win
+            assert iren is viewer.iren
+            assert renderer is not None
 
     def test_view_asymmetric(self, set_test_backend):
         lens = ReverseTelephoto()
@@ -229,6 +232,20 @@ class TestOpticViewer3D:
             viewer.view()
             mock_start.assert_called_once()
             mock_render.assert_called()
+
+    def test_view_without_interaction(self, set_test_backend):
+        lens = ReverseTelephoto()
+        viewer = OpticViewer3D(lens)
+        with (
+            patch.object(viewer.iren, "Start") as mock_start,
+            patch.object(viewer.ren_win, "Render") as mock_render,
+        ):
+            ren_win, renderer, iren = viewer.view(start_interaction=False)
+            mock_start.assert_not_called()
+            mock_render.assert_called()
+            assert ren_win is viewer.ren_win
+            assert iren is viewer.iren
+            assert renderer is not None
 
     def test_view_bonded_lens(self, set_test_backend):
         lens = TessarLens()
