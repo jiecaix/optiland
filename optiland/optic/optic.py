@@ -549,6 +549,7 @@ class Optic:
         figsize: tuple[float, float] = (1200, 800),
         dark_mode: bool = False,
         reference: ReferenceRay | None = None,
+        start_interaction: bool = True,
     ):
         """Draw a 3D representation of the optical system.
 
@@ -568,10 +569,13 @@ class Optic:
                 plot. Defaults to False.
             reference (ReferenceRay | None, optional): The reference rays to
                 plot, e.g., 'chief' or 'marginal'. Defaults to None.
+            start_interaction (bool, optional): Whether to start the VTK
+                interactor. Set to False when embedding or exporting the scene
+                in a custom visualization flow. Defaults to True.
 
         """
         viewer = OpticViewer3D(self)
-        viewer.view(
+        return viewer.view(
             fields,
             wavelengths,
             num_rays,
@@ -579,6 +583,7 @@ class Optic:
             figsize=figsize,
             dark_mode=dark_mode,
             reference=reference,
+            start_interaction=start_interaction,
         )
 
     def info(self):
