@@ -57,6 +57,7 @@ class OpticViewer3D(BaseViewer):
         figsize=(1200, 800),
         dark_mode=False,
         reference=None,
+        start_interaction=True,
     ):
         """Visualizes the optical system in 3D.
 
@@ -75,6 +76,10 @@ class OpticViewer3D(BaseViewer):
                 Defaults to False.
             reference (str, optional): The reference rays to plot. Options
                 include "chief" and "marginal". Defaults to None.
+            start_interaction (bool, optional): Whether to start the VTK
+                interaction loop. Set to False when embedding the scene into
+                another workflow or when the caller needs access to the VTK
+                objects without blocking. Defaults to True.
 
         """
         renderer = vtk.vtkRenderer()
@@ -117,4 +122,7 @@ class OpticViewer3D(BaseViewer):
         renderer.GetActiveCamera().Azimuth(150)
 
         self.ren_win.Render()
-        self.iren.Start()
+        if start_interaction:
+            self.iren.Start()
+
+        return self.ren_win, renderer, self.iren
